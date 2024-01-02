@@ -167,7 +167,7 @@ class DOTADataset(CustomDataset):
                  metric='mAP',
                  logger=None,
                  proposal_nums=(100, 300, 1000),
-                 iou_thr=0.5,
+                 iou_thr=0.1,
                  scale_ranges=None,
                  nproc=4):
         """Evaluate the dataset.
@@ -203,7 +203,7 @@ class DOTADataset(CustomDataset):
                 results,
                 annotations,
                 scale_ranges=scale_ranges,
-                iou_thr=iou_thr,
+                iou_thr=0.5,
                 dataset=self.CLASSES,
                 logger=logger,
                 nproc=nproc)

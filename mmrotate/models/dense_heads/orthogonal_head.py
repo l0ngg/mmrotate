@@ -17,7 +17,7 @@ from .utils import convex_overlaps, levels_to_images
 
 
 @ROTATED_HEADS.register_module()
-class RotatedRepPointsHead(BaseDenseHead):
+class OrthogonalHead(BaseDenseHead):
     """Rotated RepPoints head.
 
     Args:
@@ -78,7 +78,6 @@ class RotatedRepPointsHead(BaseDenseHead):
                  center_init=True,
                  transform_method='rotrect',
                  use_reassign=False,
-                 show_points=False,
                  topk=6,
                  anti_factor=0.75,
                  version='oc',
@@ -92,11 +91,10 @@ class RotatedRepPointsHead(BaseDenseHead):
                          std=0.01,
                          bias_prob=0.01)),
                  **kwargs):
-        super(RotatedRepPointsHead, self).__init__(init_cfg)
+        super(OrthogonalHead, self).__init__(init_cfg)
         self.num_points = num_points
         self.point_feat_channels = point_feat_channels
         self.center_init = center_init
-        self.show_points = show_points
 
         # we use deform conv to extract points features
         self.dcn_kernel = int(np.sqrt(num_points))
@@ -201,6 +199,7 @@ class RotatedRepPointsHead(BaseDenseHead):
         self.reppoints_pts_refine_out = nn.Conv2d(self.point_feat_channels,
                                                   pts_out_dim, 1, 1, 0)
 
+    # TODO points2orthogonal
     def points2rotrect(self, pts, y_first=True):
         """Convert points to oriented bboxes."""
         if y_first:
@@ -1009,6 +1008,16 @@ class RotatedRepPointsHead(BaseDenseHead):
         assert len(pos_normalize_term) == len(pos_inds_after_cfa)
 
         return label, label_weight, convex_weight, num_pos, pos_normalize_term
+    
+    # TODO
+    @force_fp32(apply_to=('cls_scores', 'pts_preds_init', 'pts_preds_refine'))
+    def get_ortho(self,cls_scores,pts_preds_init,pts_preds_refine,img_metas,cfg=None,rescale=False,with_nms=True,**kwargs):
+        pass
+
+    # TODO
+    def get_single_ortho(self,cls_score_list,point_pred_list,mlvl_priors,
+                           img_meta,cfg,rescale=False,with_nms=True,**kwargs):
+        pass
 
     @force_fp32(apply_to=('cls_scores', 'pts_preds_init', 'pts_preds_refine'))
     def get_bboxes(self,
@@ -1064,9 +1073,10 @@ class RotatedRepPointsHead(BaseDenseHead):
             img_meta = img_metas[img_id]
             cls_score_list = select_single_mlvl(cls_scores, img_id)
             point_pred_list = select_single_mlvl(pts_preds_refine, img_id)
+
             results = self._get_bboxes_single(cls_score_list, point_pred_list,
-                                                  mlvl_priors, img_meta, cfg,
-                                                  rescale, with_nms, **kwargs)
+                                              mlvl_priors, img_meta, cfg,
+                                              rescale, with_nms, **kwargs)
             result_list.append(results)
 
         return result_list
@@ -1122,9 +1132,6 @@ class RotatedRepPointsHead(BaseDenseHead):
 
         mlvl_bboxes = []
         mlvl_scores = []
-        if self.show_points:
-            mlvl_reppoints = []
-        
         for level_idx, (cls_score, points_pred, points) in enumerate(
                 zip(cls_score_list, point_pred_list, mlvl_priors)):
             assert cls_score.size()[-2:] == points_pred.size()[-2:]
@@ -1148,19 +1155,7 @@ class RotatedRepPointsHead(BaseDenseHead):
                 points = points[topk_inds, :]
                 points_pred = points_pred[topk_inds, :]
                 scores = scores[topk_inds, :]
-                
-            if self.show_points:
-                pts_pred = points_pred.reshape(-1, self.num_points, 2)
-                pts_pred_offsety = pts_pred[:, :, 0::2]
-                pts_pred_offsetx = pts_pred[:, :, 1::2]
-                pts_pred = torch.cat([pts_pred_offsetx, pts_pred_offsety],
-                                     dim=2).reshape(-1, 2 * self.num_points)
 
-                pts_pos_center = points[:, :2].repeat(1, self.num_points)
-                pts = pts_pred * self.point_strides[level_idx] + pts_pos_center
-
-                mlvl_reppoints.append(pts)
-        
             poly_pred = self.points2rotrect(points_pred, y_first=True)
             bbox_pos_center = points[:, :2].repeat(1, 4)
             polys = poly_pred * self.point_strides[level_idx] + bbox_pos_center
@@ -1169,18 +1164,12 @@ class RotatedRepPointsHead(BaseDenseHead):
             mlvl_bboxes.append(bboxes)
             mlvl_scores.append(scores)
 
-
         mlvl_bboxes = torch.cat(mlvl_bboxes)
+
         if rescale:
             mlvl_bboxes[..., :4] /= mlvl_bboxes[..., :4].new_tensor(
                 scale_factor)
         mlvl_scores = torch.cat(mlvl_scores)
-        
-        if self.show_points:
-            mlvl_reppoints = torch.cat(mlvl_reppoints)
-            if rescale:
-                mlvl_reppoints[..., :4] /= mlvl_reppoints[..., :4].new_tensor(scale_factor)
-            
         if self.use_sigmoid_cls:
             padding = mlvl_scores.new_zeros(mlvl_scores.shape[0], 1)
             mlvl_scores = torch.cat([mlvl_scores, padding], dim=1)
@@ -1188,10 +1177,7 @@ class RotatedRepPointsHead(BaseDenseHead):
         if with_nms:
             det_bboxes, det_labels = multiclass_nms_rotated(
                 mlvl_bboxes, mlvl_scores, cfg.score_thr, cfg.nms,
-                cfg.max_per_img, multi_reppoints=mlvl_reppoints if self.show_points else None)
-
-           
-                #, multi_reppoints=points_pred if self.show_points else None)
+                cfg.max_per_img)
             return det_bboxes, det_labels
         else:
             raise NotImplementedError

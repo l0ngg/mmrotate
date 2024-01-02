@@ -67,7 +67,7 @@ def rbbox2result(bboxes, labels, num_classes):
     else:
         bboxes = bboxes.cpu().numpy()
         labels = labels.cpu().numpy()
-        return [bboxes[labels == i, :] for i in range(num_classes)]
+        return [ bboxes[labels == i, :] for i in range(num_classes)]
 
 
 def rbbox2roi(bbox_list):

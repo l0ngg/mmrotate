@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
 from mmdet.core.visualization import palette_val
+from .arrange import arrange
 from mmdet.core.visualization.image import draw_labels, draw_masks
 
 from mmrotate.core.visualization.palette import get_palette
@@ -36,6 +37,24 @@ def _get_adaptive_scales(areas, min_area=800, max_area=30000):
     scales = np.clip(scales, 0.5, 1.0)
     return scales
 
+def draw_ortho(ax, list_reppoints, color='g', alpha=0.8, thickness=2):
+    for i, reppoints in enumerate(list_reppoints):
+        xs = reppoints[0::2]
+        ys = reppoints[1::2]
+        pts = np.array(list(zip( xs, ys)))
+        arranged = arrange( pts )
+        
+        #     for pt in contour:
+        #         print(pt)
+        
+        # ax.plot([x[0] for x in pts], [x[1] for x in pts], 'cyan')
+        # current_color = color[0]
+        ax.plot([x[0] for x in arranged], [x[1] for x in arranged], color, linewidth=thickness)
+        
+        # print(color)
+        for index, contour in enumerate(pts):
+            for x, y in zip(contour[::2], contour[1::2]):
+                ax.plot(x, y, 'cyan', marker = 'o')
 
 def draw_rbboxes(ax, bboxes, color='g', alpha=0.8, thickness=2):
     """Draw oriented bounding boxes on the axes.
@@ -120,12 +139,18 @@ def imshow_det_rbboxes(img,
     Returns:
         ndarray: The image with bboxes drawn on it.
     """
+
+    reppoints = None
+    if bboxes.shape[1]>6:
+        reppoints = bboxes[:,5:]
+        bboxes = bboxes[:,:5]
+    bboxes = np.column_stack((bboxes, reppoints[:,-1]))
+
     assert bboxes is None or bboxes.ndim == 2, \
         f' bboxes ndim should be 2, but its ndim is {bboxes.ndim}.'
     assert labels.ndim == 1, \
         f' labels ndim should be 1, but its ndim is {labels.ndim}.'
-    assert bboxes is None or bboxes.shape[1] == 5 or bboxes.shape[1] == 6, \
-        f' bboxes.shape[1] should be 5 or 6, but its {bboxes.shape[1]}.'
+    assert bboxes is None or bboxes.shape[1] == 5 or bboxes.shape[1] == 6, f' bboxes.shape[1] should be 5 or 6, but its {bboxes.shape[1]}.'
     assert bboxes is None or bboxes.shape[0] <= labels.shape[0], \
         'labels.shape[0] should not be less than bboxes.shape[0].'
     assert segms is None or segms.shape[0] == labels.shape[0], \
@@ -134,12 +159,14 @@ def imshow_det_rbboxes(img,
         'segms and bboxes should not be None at the same time.'
 
     img = mmcv.imread(img).astype(np.uint8)
-
+    
     if score_thr > 0:
         assert bboxes is not None and bboxes.shape[1] == 6
-        scores = bboxes[:, -1]
+        scores = reppoints[:, -1]
         inds = scores > score_thr
         bboxes = bboxes[inds, :]
+        reppoints = reppoints[inds, :]
+        print(bboxes.shape, reppoints.shape)
         labels = labels[inds]
         if segms is not None:
             segms = segms[inds, ...]
@@ -165,21 +192,21 @@ def imshow_det_rbboxes(img,
     text_palette = palette_val(get_palette(text_color, max_label + 1))
     text_colors = [text_palette[label] for label in labels]
 
-    num_bboxes = 0
-    if bboxes is not None:
-        num_bboxes = bboxes.shape[0]
+    num_ortho = 0
+    if reppoints is not None:
+        num_ortho = reppoints.shape[0]
         bbox_palette = palette_val(get_palette(bbox_color, max_label + 1))
-        colors = [bbox_palette[label] for label in labels[:num_bboxes]]
-        draw_rbboxes(ax, bboxes, colors, alpha=0.8, thickness=thickness)
+        colors = [bbox_palette[label] for label in labels[:num_ortho]]
+        draw_ortho(ax, reppoints[:,:-1], colors, alpha=0.8, thickness=thickness)
 
         horizontal_alignment = 'left'
-        positions = bboxes[:, :2].astype(np.int32) + thickness
+        positions = reppoints[:, :2].astype(np.int32) + thickness
         areas = bboxes[:, 2] * bboxes[:, 3]
         scales = _get_adaptive_scales(areas)
-        scores = bboxes[:, 5] if bboxes.shape[1] == 6 else None
+        scores = reppoints[:,-1] if reppoints.shape[1] == 19 else None
         draw_labels(
             ax,
-            labels[:num_bboxes],
+            labels[:num_ortho],
             positions,
             scores=scores,
             class_names=class_names,
@@ -206,7 +233,7 @@ def imshow_det_rbboxes(img,
                 positions.append(centroids[largest_id])
                 areas.append(stats[largest_id, -1])
             areas = np.stack(areas, axis=0)
-            scales = _get_adaptive_scales(areas)
+            scales = 1
             draw_labels(
                 ax,
                 labels[num_bboxes:],

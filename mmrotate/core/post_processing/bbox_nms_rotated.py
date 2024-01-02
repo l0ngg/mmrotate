@@ -9,7 +9,8 @@ def multiclass_nms_rotated(multi_bboxes,
                            nms,
                            max_num=-1,
                            score_factors=None,
-                           return_inds=False):
+                           return_inds=False,
+                           multi_reppoints = None):
     """NMS for multi-class bboxes.
 
     Args:
@@ -37,6 +38,9 @@ def multiclass_nms_rotated(multi_bboxes,
     else:
         bboxes = multi_bboxes[:, None].expand(
             multi_scores.size(0), num_classes, 5)
+    
+    # print('#'*100, '\n','step 1: reppoint - bboxes: ',multi_reppoints.shape, multi_bboxes.shape, '\n')
+
     scores = multi_scores[:, :-1]
 
     labels = torch.arange(num_classes, dtype=torch.long, device=scores.device)
@@ -53,12 +57,23 @@ def multiclass_nms_rotated(multi_bboxes,
             multi_scores.size(0), num_classes)
         score_factors = score_factors.reshape(-1)
         scores = scores * score_factors
-
+   
     inds = valid_mask.nonzero(as_tuple=False).squeeze(1)
     bboxes, scores, labels = bboxes[inds], scores[inds], labels[inds]
 
+    if multi_reppoints is not None:
+        # print('#*100','\n',valid_mask.shape,'\n')
+        # print('@*100','\n',multi_reppoints.shape,'\n')
+        # print('before valid mask : ')
+        reppoints = multi_reppoints[valid_mask]
+        # print('after valid mask: ',reppoints.shape)
+
     if bboxes.numel() == 0:
         dets = torch.cat([bboxes, scores[:, None]], -1)
+        if multi_reppoints is None:
+            bboxes = multi_bboxes.new_zeros((0, 9))
+        else:
+            bboxes = multi_bboxes.new_zeros((0, reppoints.size(-1) + 9))
         if return_inds:
             return dets, labels, inds
         else:
@@ -83,6 +98,10 @@ def multiclass_nms_rotated(multi_bboxes,
         keep = keep[:max_num]
 
     bboxes = bboxes[keep]
+    if multi_reppoints is not None:
+        reppoints = reppoints[keep]
+        bboxes = torch.cat([bboxes, reppoints], dim=1)
+
     scores = scores[keep]
     labels = labels[keep]
 
